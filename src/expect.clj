@@ -187,25 +187,35 @@
       (prn))
     (println (format-error-totals (count-errors errors) num-es))))
 
-(defn- ns-matches [pattern]
-  (for [ns-sym (keys @expectations)
+(defn- ns-matches [ns-syms pattern]
+  (for [ns-sym ns-syms
         :when (match-glob pattern (str ns-sym))]
     ns-sym))
 
+(defn loaded-namespaces []
+  (keys @expectations))
+
+(defn- print-ns-errors [ns-errors]
+  (doseq [[ns-sym errors] ns-errors]
+    (when (seq errors)
+      (prn)
+      (pr-data (color/cyan ns-sym))
+      (pad-left (print-errors errors))
+      (prn))))
+
+(defn- count-ns-errors [ns-errors]
+  (->> ns-errors (mapcat second) count-errors))
+
 (defn run-ns* [pattern]
-  (let [matches (ns-matches pattern)]
+  (let [matches (ns-matches (loaded-namespaces) pattern)]
     (when (seq matches)
-      (let [num-errors (atom 0)
-            num-es (counte (select-keys @expectations matches))]
-        (doseq [ns-sym matches
-                errors (test-ns ns-sym)]
-          (when (seq errors)
-            (swap! num-errors + (count-errors errors))
-            (prn)
-            (pr-data (color/cyan ns-sym))
-            (pad-left (print-errors errors))
-            (prn)))
-        (println (format-error-totals @num-errors num-es))))))
+      (let [num-es (counte (select-keys @expectations matches))
+            ns-errors (for [ns-sym matches
+                            :let [errors (test-ns ns-sym)]]
+                        [ns-sym errors])
+            num-errors (count-ns-errors ns-errors)]
+        (print-ns-errors ns-errors)
+        (println (format-error-totals num-errors num-es))))))
 
 (defmacro run-ns# [pattern]
   `(run-ns* ~(name pattern)))
@@ -217,15 +227,10 @@
 
 (defn run-all []
   (let [num-es (counte @expectations)
-        num-errors (atom 0)]
-    (doseq [[ns-sym errors] (test-all)]
-      (when (seq errors)
-        (swap! num-errors + (count-errors errors))
-        (prn)
-        (pr-data (color/cyan ns-sym))
-        (pad-left (print-errors errors))
-        (prn)))
-    (println (format-error-totals @num-errors num-es))))
+        ns-errors (test-all)
+        num-errors (count-ns-errors ns-errors)]
+    (print-ns-errors ns-errors)
+    (println (format-error-totals num-errors num-es))))
 
 (comment
   (require '[clojure.core.async :as async :refer [go <! <!! alts!!]])
