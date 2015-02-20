@@ -34,10 +34,11 @@
 (defn adde
   "Add expectation."
   [e]
-  (when *top-level*
+  (if *top-level*
     (let [curr-ns (ns-name *ns*)]
-      (swap! expectations update-in [curr-ns] init-ns-es e)))
-  e)
+      (swap! expectations update-in [curr-ns] init-ns-es e)
+      nil)
+    e))
 
 (defrecord Expectation [code expected f]
   Testable
