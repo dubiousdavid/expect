@@ -17,6 +17,11 @@
 (def ^{:dynamic true :private true} *padding* 0)
 (def ^{:private false} expectations (atom {}))
 
+(defn$ loaded-namespaces [=> (Seq Symbol)]
+  "Returns a sequence of loaded namespace symbols."
+  []
+  (keys @expectations))
+
 (extend-protocol proto/Countable
   nil
   (counte [this] 0)
@@ -128,21 +133,31 @@
   (let [es (@expectations (ns->sym namespace))]
     (eval-state (test-es es) pmap)))
 
+(defn$ test-all* [(Seq Symbol) => NsErrors]
+  {:private true}
+  [ns-syms]
+  (mapv (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms))
+
 (defn$ test-all [=> NsErrors]
   "Test expectations for all namespaces."
   []
-  (let [ns-syms (keys @expectations)]
-    (mapv (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms)))
+  (let [ns-syms (loaded-namespaces)]
+    (test-all* ns-syms)))
+
+(defn$ ptest-all* [(Seq Symbol) Level => NsErrors]
+  {:private true}
+  [ns-syms level]
+  (case level
+    :ex (mapv (fn [ns-sym] [ns-sym (ptest-ns ns-sym)]) ns-syms)
+    :ns (vec (pmap (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms))))
 
 (defn$ ptest-all [& (KwA :level Level) => NsErrors]
   "Test expectations for all namespaces. Will spawn a
   new thread for each expectation or namespace. Default
   is a new thread for each namespace."
   [& {:keys [level] :or {level :ns}}]
-  (let [ns-syms (keys @expectations)]
-    (case level
-      :ex (mapv (fn [ns-sym] [ns-sym (ptest-ns ns-sym)]) ns-syms)
-      :ns (vec (pmap (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms)))))
+  (let [ns-syms (loaded-namespaces)]
+    (ptest-all* ns-syms level)))
 
 (defn$ clear-ns [NsOrSym =>]
   "Clear expectations for the given namespace."
@@ -234,11 +249,6 @@
   [namespace]
   (run-ns* (ns->sym namespace) ptest-ns))
 
-(defn$ loaded-namespaces [=> (Seq Symbol)]
-  "Returns a sequence of loaded namespace symbols."
-  []
-  (keys @expectations))
-
 (defn$ print-ns-errors [NsErrors =>]
   {:private true}
   [ns-errors]
@@ -254,20 +264,31 @@
   [ns-errors]
   (->> ns-errors (mapcat second) count-errors))
 
-(defn$ run-ns-pattern* [String =>]
+(defn$ run-ns-pattern [String =>]
   [pattern]
   (let [matches (ns-matches (loaded-namespaces) pattern)]
     (when (seq matches)
       (let [num-es (counte (select-keys @expectations matches))
-            ns-errors (for [ns-sym matches
-                            :let [errors (test-ns ns-sym)]]
-                        [ns-sym errors])
+            ns-errors (test-all* matches)
             num-errors (count-ns-errors ns-errors)]
         (print-ns-errors ns-errors)
         (println (format-error-totals num-errors num-es))))))
 
 (defmacro run-ns# [pattern]
   `(run-ns-pattern ~(name pattern)))
+
+(defn$ prun-ns-pattern [String Level =>]
+  [pattern level]
+  (let [matches (ns-matches (loaded-namespaces) pattern)]
+    (when (seq matches)
+      (let [num-es (counte (select-keys @expectations matches))
+            ns-errors (ptest-all* matches level)
+            num-errors (count-ns-errors ns-errors)]
+        (print-ns-errors ns-errors)
+        (println (format-error-totals num-errors num-es))))))
+
+(defmacro prun-ns# [pattern & {:keys [level] :or {level :ns}}]
+  `(prun-ns-pattern ~(name pattern) ~level))
 
 (defn$ rerun-ns [NsOrSym =>]
   "Reload expectations for the given namespace, test
