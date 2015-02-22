@@ -210,7 +210,7 @@
 (defn$ format-error-totals [Int Int => String]
   {:private true}
   [num-errors num-es]
-  (let [result (str "Result: Ran " num-es " test(s).")]
+  (let [result (space "Ran" num-es "test(s).")]
     (if (> num-es 0)
       (if (> num-errors 0)
         (color/magenta (space result num-errors "error(s) found."))
