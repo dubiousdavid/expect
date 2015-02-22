@@ -1,10 +1,14 @@
 (ns expect
-  (:use [rk.annotate :only [validate]]
-        [clojure.core.match :only [match]]
-        [stch.glob :only [match-glob]])
-  (:require rk.annotate.types
+  (:require [rk.annotate :refer [validate]]
+            [clojure.core.match :refer [match]]
+            [rk.annotate.fns :refer [defn$]]
+            [rk.annotate.types :refer [U KwA Vec Int Option Seq Symbol Fn Seqable]]
+            [expect.types :refer [NsOrSym Level TestableCountable Errors NsErrors]]
+            [rk.monads.state :refer [state-> return-state statefn eval-state]]
+            [expect.util :refer [sum init-ns-es reconstruct-args
+                                 repeat-str space ns->sym ns-matches]]
             [expect.colors :as color]
-            [clojure.string :as string]
+            [expect.protocols :as proto :refer [teste counte takev]]
             [clojure.core.async :as async :refer [go <! <!! alts!!]]
             clojure.core.async.impl.channels)
   (:import [clojure.lang APersistentMap Sequential IDeref]))
@@ -13,25 +17,15 @@
 (def ^{:dynamic true :private true} *padding* 0)
 (def ^{:private false} expectations (atom {}))
 
-(defprotocol Testable
-  (teste [this] "Test expectation."))
-
-(defprotocol Countable
-  (counte [this]))
-
-(defn- sum [xs]
-  (reduce + 0 xs))
-
-(extend-protocol Countable
+(extend-protocol proto/Countable
+  nil
+  (counte [this] 0)
   APersistentMap
   (counte [this] (sum (map counte (vals this))))
   Sequential
   (counte [this] (sum (map counte this))))
 
-(defn- init-ns-es [es e]
-  (if es (conj es e) [e]))
-
-(defn adde
+(defn$ adde [TestableCountable => (Option TestableCountable)]
   "Add expectation."
   [e]
   (if *top-level*
@@ -41,31 +35,21 @@
     e))
 
 (defrecord Expectation [code expected f]
-  Testable
+  proto/Testable
   (teste [this]
-    (let [val (f)]
-      (match val
-        [::timeout timeout] [code (str "Timed out after " timeout " ms")]
-        [::exception e] [code (str "Caught: " (.toString e))]
-        [::did-not-throw v] [code (str "Expected a thrown exception. Actual: " v)]
-        :else (when-let [error (validate expected val)]
-                [code error]))))
+    (statefn [_]
+      (let [val (f)]
+        (match val
+          [::timeout timeout] [code (space "Timed out after" timeout "ms")]
+          [::exception e] [code (space "Caught:" (.toString e))]
+          [::did-not-throw v] [code (space "Expected a thrown exception. Actual:" v)]
+          :else (when-let [error (validate expected val)]
+                  [code error])))))
 
-  Countable
+  proto/Countable
   (counte [this] 1))
 
-(defn- reconstruct-args [async throws timeout]
-  (->> [(when async [:async true])
-        (when throws [:throws true])
-        (when (> timeout 0) [:timeout timeout])]
-       (remove nil?)
-       flatten))
-
-(defprotocol Async
-  (takev [this timeout]
-    "Take a value from an async source, while handling timeouts."))
-
-(extend-protocol Async
+(extend-protocol proto/Async
   IDeref
   (takev [this timeout]
     (if (> timeout 0)
@@ -104,17 +88,26 @@
         code (list* 'expect expected actual args)]
     `(adde (Expectation. '~code ~expected ~f))))
 
-(defn- test-es [es]
-  (->> es (map teste) (remove nil?) vec))
+(defn$ test-es [(Seqable TestableCountable) => Fn]
+  "Test expectations."
+  {:private true}
+  [es]
+  (statefn [map-fn]
+    (->> es
+         (map-fn teste)
+         (map #(eval-state % map-fn))
+         (remove nil?)
+         vec)))
 
 (defrecord DescribeBlock [description body]
-  Testable
+  proto/Testable
   (teste [this]
-    (let [errors (test-es body)]
-      (when (seq errors)
-        [description errors])))
+    (state-> [errors (test-es body)]
+      (return-state
+       (when (seq errors)
+         [description errors]))))
 
-  Countable
+  proto/Countable
   (counte [this] (sum (map counte body))))
 
 (defmacro describe [description & body]
@@ -122,40 +115,73 @@
                         (binding [*top-level* false]
                           (flatten (list ~@body))))))
 
-(defn test-ns [ns-sym]
-  (let [es (@expectations ns-sym)]
-    (test-es es)))
+(defn$ test-ns [NsOrSym => Errors]
+  "Test expectations for the given namespace."
+  [namespace]
+  (let [es (@expectations (ns->sym namespace))]
+    (eval-state (test-es es) map)))
 
-(defn test-all []
+(defn$ ptest-ns [NsOrSym => Errors]
+  "Test expectations for the given namespace.
+  Will spawn a new thread for each expectation."
+  [namespace]
+  (let [es (@expectations (ns->sym namespace))]
+    (eval-state (test-es es) pmap)))
+
+(defn$ test-all [=> NsErrors]
+  "Test expectations for all namespaces."
+  []
   (let [ns-syms (keys @expectations)]
     (mapv (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms)))
 
-(defn clear-ns [ns-sym]
-  (swap! expectations dissoc ns-sym))
+(defn$ ptest-all [& (KwA :level Level) => NsErrors]
+  "Test expectations for all namespaces. Will spawn a
+  new thread for each expectation or namespace. Default
+  is a new thread for each namespace."
+  [& {:keys [level] :or {level :ns}}]
+  (let [ns-syms (keys @expectations)]
+    (case level
+      :ex (mapv (fn [ns-sym] [ns-sym (ptest-ns ns-sym)]) ns-syms)
+      :ns (vec (pmap (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms)))))
 
-(defn clear-all []
-  (reset! expectations {}))
+(defn$ clear-ns [NsOrSym =>]
+  "Clear expectations for the given namespace."
+  [namespace]
+  (swap! expectations dissoc (ns->sym namespace))
+  nil)
 
-(defn retest-ns [ns-sym]
-  (clear-ns ns-sym)
-  (require :reload ns-sym)
-  (test-ns ns-sym))
+(defn clear-all
+  "Clear expectations for all namespaces."
+  []
+  (reset! expectations {})
+  nil)
+
+(defn$ retest-ns [NsOrSym => Errors]
+  "Reload expectations for the given namespace and test."
+  [namespace]
+  (let [ns-sym (ns->sym namespace)]
+    (clear-ns ns-sym)
+    (require :reload ns-sym)
+    (test-ns ns-sym)))
 
 (defmacro pad-left
+  "Increase left padding by two spaces."
   [& body]
   `(binding [*padding* (+ *padding* 2)]
      ~@body))
 
-(defn- repeat-str [n ^String s]
-  (apply str (repeat n s)))
-
-(defn- pad-data [form]
+(defn ^String pad-data
+  "Left pad form by *padding* spaces."
+  [form]
   (str (repeat-str *padding* " ") form))
 
-(def ^{:private true} pr-data
+(def ^{:doc "Pad data and print."} pr-data
   (comp println pad-data))
 
-(defn- print-errors [errors]
+(defn$ print-errors [Errors =>]
+  "Print errors with appropriate padding and colors."
+  {:private true}
+  [errors]
   (doseq [error errors]
     (match error
       [(description :guard string?) block-errors]
@@ -166,37 +192,56 @@
       (do (pr-data code)
           (pr-data (color/magenta actual))))))
 
-(defn- format-error-totals [num-errors num-es]
-  (let [num-ran (str "Ran " num-es " test(s).")]
-    (if (> num-errors 0)
-      (color/magenta (str "Result: " num-ran " " num-errors " error(s) found."))
-      (color/green (str "Result: " num-ran " No errors found.")))))
+(defn$ format-error-totals [Int Int => String]
+  {:private true}
+  [num-errors num-es]
+  (let [result (str "Result: Ran " num-es " test(s).")]
+    (if (> num-es 0)
+      (if (> num-errors 0)
+        (color/magenta (space result num-errors "error(s) found."))
+        (color/green (space result "No errors found.")))
+      (color/green result))))
 
-(defn- count-errors [errors]
+(defn$ count-errors [Errors => Int]
+  {:private true}
+  [errors]
   (sum (for [error errors]
          (match error
            [(_ :guard string?) block-errors]
            (count-errors block-errors)
            [_ _] 1))))
 
-(defn run-ns [ns-sym]
+(defn$ run-ns* [Symbol Fn =>]
+  {:private true}
+  [ns-sym test-fn]
   (let [num-es (counte (@expectations ns-sym))
-        errors (test-ns ns-sym)]
+        errors (test-fn ns-sym)]
     (when (seq errors)
       (prn)
       (print-errors errors)
       (prn))
     (println (format-error-totals (count-errors errors) num-es))))
 
-(defn- ns-matches [ns-syms pattern]
-  (for [ns-sym ns-syms
-        :when (match-glob pattern (str ns-sym))]
-    ns-sym))
+(defn$ run-ns [NsOrSym =>]
+  "Test expectations for the given namespace and print
+  the results."
+  [namespace]
+  (run-ns* (ns->sym namespace) test-ns))
 
-(defn loaded-namespaces []
+(defn$ prun-ns [NsOrSym =>]
+  "Test expectations for the given namespace and print
+  the results. Spawn a new thread for each expectation."
+  [namespace]
+  (run-ns* (ns->sym namespace) ptest-ns))
+
+(defn$ loaded-namespaces [=> (Seq Symbol)]
+  "Returns a sequence of loaded namespace symbols."
+  []
   (keys @expectations))
 
-(defn- print-ns-errors [ns-errors]
+(defn$ print-ns-errors [NsErrors =>]
+  {:private true}
+  [ns-errors]
   (doseq [[ns-sym errors] ns-errors]
     (when (seq errors)
       (prn)
@@ -204,10 +249,13 @@
       (pad-left (print-errors errors))
       (prn))))
 
-(defn- count-ns-errors [ns-errors]
+(defn$ count-ns-errors [NsErrors => Int]
+  {:private true}
+  [ns-errors]
   (->> ns-errors (mapcat second) count-errors))
 
-(defn run-ns* [pattern]
+(defn$ run-ns-pattern* [String =>]
+  [pattern]
   (let [matches (ns-matches (loaded-namespaces) pattern)]
     (when (seq matches)
       (let [num-es (counte (select-keys @expectations matches))
@@ -219,33 +267,33 @@
         (println (format-error-totals num-errors num-es))))))
 
 (defmacro run-ns# [pattern]
-  `(run-ns* ~(name pattern)))
+  `(run-ns-pattern ~(name pattern)))
 
-(defn rerun-ns [ns-sym]
-  (clear-ns ns-sym)
-  (require :reload ns-sym)
-  (run-ns ns-sym))
+(defn$ rerun-ns [NsOrSym =>]
+  "Reload expectations for the given namespace, test
+  and print the results."
+  [namespace]
+  (let [ns-sym (ns->sym namespace)]
+    (clear-ns ns-sym)
+    (require :reload ns-sym)
+    (run-ns ns-sym)))
 
-(defn run-all []
+(defn$ run-all* [NsErrors =>]
+  {:private true}
+  [ns-errors]
   (let [num-es (counte @expectations)
-        ns-errors (test-all)
         num-errors (count-ns-errors ns-errors)]
     (print-ns-errors ns-errors)
     (println (format-error-totals num-errors num-es))))
 
-(comment
-  (require '[clojure.core.async :as async :refer [go <! <!! alts!!]])
+(defn run-all
+  "Test expectations for all namespaces and print the results."
+  []
+  (run-all* (test-all)))
 
-  (expect Double (+ 1 1))
-  (expect (I ArithmeticException (ExMsg "Divide by zero")) (/ 1 0) :throws true)
-  (expect ArithmeticException (/ 1 2) :throws true)
-  (expect 3 (future 3) :async true)
-  (expect 3 (future (Thread/sleep 200) 3) :async true :timeout 100)
-  (expect 3 (go 3) :async true)
-  (expect 3 (go (<! (async/timeout 200)) 3) :async true :timeout 100)
-  (expect 3 (Thread/sleep 200) :timeout 100)
-  (describe "conj"
-    (expect [1 2] (conj [1] 2))
-    (expect [1 2 3] (conj [1 2] 2))
-    (expect [1 2] (conj nil 1 2))
-    (expect (list 1 2) (conj (list 1) 2))))
+(defn$ prun-all [& (KwA :level Level) =>]
+  "Test expectations for all namespaces and print the results.
+  Will spawn a  new thread for each expectation or namespace.
+  Default is a new thread for each namespace."
+  [& {:keys [level] :or {level :ns}}]
+  (run-all* (ptest-all :level level)))
