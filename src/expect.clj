@@ -99,8 +99,8 @@
   [es]
   (statefn [map-fn]
     (->> es
-         (map-fn teste)
-         (map #(eval-state % map-fn))
+         (map teste)
+         (map-fn #(eval-state % map-fn))
          (remove nil?)
          vec)))
 
