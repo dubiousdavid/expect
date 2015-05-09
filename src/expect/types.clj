@@ -1,6 +1,6 @@
 (ns expect.types
   (:require [expect.protocols :as proto]
-            [rk.annotate.types :refer [U I Protocol Symbol Any Seqable]]))
+            [annotate.types :refer [U I Protocol Symbol Any Seqable]]))
 
 (def NsOrSym (U Symbol clojure.lang.Namespace))
 (def Level (U :ex :ns))

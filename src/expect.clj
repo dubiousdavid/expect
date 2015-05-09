@@ -1,8 +1,9 @@
 (ns expect
-  (:require [rk.annotate :refer [validate]]
+  (:require [annotate
+             [core :refer [check]]
+             [fns :refer [defn$]]
+             [types :refer [U KwA Vec Int Option Seq Symbol Fn Seqable]]]
             [clojure.core.match :refer [match]]
-            [rk.annotate.fns :refer [defn$]]
-            [rk.annotate.types :refer [U KwA Vec Int Option Seq Symbol Fn Seqable]]
             [expect.types :refer [NsOrSym Level TestableCountable Errors NsErrors]]
             [rk.monads.state :refer [state-> return-state statefn eval-state]]
             [expect.util :refer [sum init-ns-es reconstruct-args
@@ -48,7 +49,7 @@
           [::timeout timeout] [code (space "Timed out after" timeout "ms")]
           [::exception e] [code (space "Caught:" (.toString e))]
           [::did-not-throw v] [code (space "Expected a thrown exception. Actual:" v)]
-          :else (when-let [error (validate expected val)]
+          :else (when-let [error (check expected val)]
                   [code error])))))
 
   proto/Countable

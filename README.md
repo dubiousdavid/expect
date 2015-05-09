@@ -1,6 +1,6 @@
 # expect
 
-Unit-testing library based on rk-annotate and ideas from various existing libraries.
+Unit-testing library based on [annotate](https://github.com/roomkey/annotate) and ideas from various existing libraries.
 
 ## Installation
 
