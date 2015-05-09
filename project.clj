@@ -8,6 +8,6 @@
                  [org.clojure/core.match "0.2.2"]
                  [org.clojure/core.async "0.1.346.0-17112a-alpha"]
                  [stch-library/glob "0.2.0"]
-                 [com.roomkey/monads "0.9.1"]]
+                 [com.roomkey/monads "0.9.3"]]
   :profiles {:dev {:jvm-opts ["-Dannotate.typecheck=on"]
                    :dependencies [[midje "1.6.3"]]}})
