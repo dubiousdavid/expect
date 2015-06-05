@@ -1,18 +1,19 @@
-(ns expect
+(ns expect.core
   (:require [annotate
              [core :refer [check]]
              [fns :refer [defn$]]
              [types :refer [U KwA Vec Int Option Seq Symbol Fn Seqable]]]
             [clojure.core.match :refer [match]]
             [expect.types :refer [NsOrSym Level TestableCountable Errors NsErrors]]
-            [rk.monads.state :refer [state-> return-state statefn eval-state]]
+            [monads.state :refer [state-> return-state statefn eval-state]]
             [expect.util :refer [sum init-ns-es reconstruct-args
                                  repeat-str space ns->sym ns-matches]]
             [expect.colors :as color]
             [expect.protocols :as proto :refer [teste counte takev]]
             [clojure.core.async :as async :refer [go <! <!! alts!!]]
-            clojure.core.async.impl.channels)
-  (:import [clojure.lang APersistentMap Sequential IDeref]))
+            clojure.core.async.impl.protocols)
+  (:import [clojure.lang APersistentMap Sequential IDeref]
+           [clojure.core.async.impl.protocols ReadPort]))
 
 (def ^{:dynamic true :private true} *top-level* true)
 (def ^{:dynamic true :private true} *padding* 0)
@@ -62,7 +63,7 @@
       (deref this timeout [::timeout timeout])
       (deref this)))
 
-  clojure.core.async.impl.channels.ManyToManyChannel
+  ReadPort
   (takev [this timeout]
     (if (> timeout 0)
       (let [ch (go (<! (async/timeout timeout)) [::timeout timeout])]
@@ -77,6 +78,10 @@
 
 (defmacro expect [expected actual & {:keys [async timeout throws]
                                      :or {async false, timeout 0, throws false}}]
+  "Generate an expectation passing the expected value and an expression. Optionally
+  specify a timeout in ms, whether you expect an exception to be thrown, and
+  whether the expression returns an asynchronous value. Supported asynchronous
+  values are anything that implements IDeref and core.async channels."
   (let [actual' (if async
                   `(takev ~actual ~timeout)
                   `(handle-timeout ~actual ~timeout))
@@ -117,6 +122,7 @@
   (counte [this] (sum (map counte body))))
 
 (defmacro describe [description & body]
+  "Describe a group of expectations."
   `(adde (DescribeBlock. ~description
                         (binding [*top-level* false]
                           (flatten (list ~@body))))))
@@ -128,8 +134,8 @@
     (eval-state (test-es es) map)))
 
 (defn$ ptest-ns [NsOrSym => Errors]
-  "Test expectations for the given namespace.
-  Will spawn a new thread for each expectation."
+  "Test expectations for the given namespace. Will spawn
+  a new thread for each expectation."
   [namespace]
   (let [es (@expectations (ns->sym namespace))]
     (eval-state (test-es es) pmap)))
@@ -153,9 +159,9 @@
     :ns (vec (pmap (fn [ns-sym] [ns-sym (test-ns ns-sym)]) ns-syms))))
 
 (defn$ ptest-all [& (KwA :level Level) => NsErrors]
-  "Test expectations for all namespaces. Will spawn a
-  new thread for each expectation or namespace. Default
-  is a new thread for each namespace."
+  "Test expectations for all namespaces. Will spawn a new thread
+  for each expectation or namespace. Default is a new thread for
+  each namespace."
   [& {:keys [level] :or {level :ns}}]
   (let [ns-syms (loaded-namespaces)]
     (ptest-all* ns-syms level)))
@@ -239,14 +245,13 @@
     (println (format-error-totals (count-errors errors) num-es))))
 
 (defn$ run-ns [NsOrSym =>]
-  "Test expectations for the given namespace and print
-  the results."
+  "Test expectations for the given namespace and print the results."
   [namespace]
   (run-ns* (ns->sym namespace) test-ns))
 
 (defn$ prun-ns [NsOrSym =>]
-  "Test expectations for the given namespace and print
-  the results. Spawn a new thread for each expectation."
+  "Test expectations for the given namespace and print the results.
+  Spawn a new thread for each expectation."
   [namespace]
   (run-ns* (ns->sym namespace) ptest-ns))
 
@@ -292,8 +297,7 @@
   `(prun-ns-pattern ~(name pattern) ~level))
 
 (defn$ rerun-ns [NsOrSym =>]
-  "Reload expectations for the given namespace, test
-  and print the results."
+  "Reload expectations for the given namespace, test and print the results."
   [namespace]
   (let [ns-sym (ns->sym namespace)]
     (clear-ns ns-sym)

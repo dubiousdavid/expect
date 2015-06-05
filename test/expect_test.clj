@@ -1,5 +1,5 @@
 (ns expect-test
-  (:require [expect :refer :all]
+  (:require [expect.core :refer :all]
             [midje.sweet :refer :all]
             [clojure.core.async :as async :refer [go <!]]
             [annotate.types :refer [I ExMsg Eq]]))
