@@ -11,6 +11,7 @@
             [expect.colors :as color]
             [expect.protocols :as proto :refer [teste counte takev]]
             [clojure.core.async :as async :refer [go <! <!! alts!!]]
+            [clojure.string :as string]
             clojure.core.async.impl.protocols)
   (:import [clojure.lang APersistentMap Sequential IDeref]
            [clojure.core.async.impl.protocols ReadPort]))
@@ -48,7 +49,7 @@
       (let [val (f)]
         (match val
           [::timeout timeout] [code (space "Timed out after" timeout "ms")]
-          [::exception e] [code (space "Caught:" (.toString e))]
+          [::exception e] [code e]
           [::did-not-throw v] [code (space "Expected a thrown exception. Actual:" v)]
           :else (when-let [error (check expected val)]
                   [code error])))))
@@ -90,11 +91,11 @@
                (try
                  (let [v# ~actual']
                    [::did-not-throw v#])
-                 (catch Exception e# e#)))
+                 (catch Throwable e# e#)))
             `(fn []
                (try
                  ~actual'
-                 (catch Exception e# [::exception e#]))))
+                 (catch Throwable e# [::exception e#]))))
         args (reconstruct-args async throws timeout)
         code (list* 'expect expected actual args)]
     `(adde (Expectation. '~code ~expected ~f))))
@@ -212,7 +213,14 @@
 
       [code actual]
       (do (pr-data code)
-          (pr-data (color/magenta actual))))))
+          (if (instance? Throwable actual)
+            (->> (cons actual (.getStackTrace actual))
+                 (take 13)
+                 (map pad-data)
+                 (string/join \newline)
+                 color/magenta
+                 println)
+            (pr-data (color/magenta actual)))))))
 
 (defn$ format-error-totals [Int Int => String]
   {:private true}
