@@ -10,4 +10,7 @@
                  [stch-library/glob "0.2.0"]
                  [com.2tothe8th/monads "0.1.0"]]
   :profiles {:dev {:jvm-opts ["-Dannotate.typecheck=on"]
-                   :dependencies [[midje "1.6.3"]]}})
+                   :dependencies [[midje "1.6.3"]]
+                   :codox {:src-dir-uri "https://github.com/dubiousdavid/expect/blob/master/"
+                           :src-linenum-anchor-prefix "L"
+                           :output-dir "."}}})
