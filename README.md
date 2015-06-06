@@ -18,6 +18,10 @@ Unit-testing library based on [annotate](https://github.com/roomkey/annotate) an
 
 See: https://github.com/dubiousdavid/lein-expect for a leiningen plugin.
 
+## API Documentation
+
+http://dubiousdavid.github.io/expect
+
 ## Usage
 
 To create an expectation we call the `expect` macro passing in two mandatory fields: a type describing the shape of our data and an expression to test. The types can be any valid type from the annotate library. For example, we might pass a class such as String or Double, as seen below.  Please refer to the [extensive documentation](https://github.com/roomkey/annotate#annotate) on the annotate project page for more information.
