@@ -52,7 +52,7 @@ For each namespace where expectations exist a vector of errors is returned indic
 
 This is really nice, but we may want to render the results of our tests in a more human-readable manner. To do this we can call the print variation of `test-all`, called `run-all`. This renders the following:
 
-![output-1](http://localhost:8000/images/output-1.png)
+![output-1](https://raw.githubusercontent.com/dubiousdavid/expect/master/images/output-1.png)
 
 ### Exceptions
 
@@ -102,7 +102,7 @@ To group multiple expectations together we can wrap them in a call to `describe`
 
 Calling `run-all` produces the following output. Notice that expectations within a call to `describe` are indented.
 
-![output-2](http://localhost:8000/images/output-2.png)
+![output-2](https://raw.githubusercontent.com/dubiousdavid/expect/master/images/output-2.png)
 
 ### Running tests in parallel
 
